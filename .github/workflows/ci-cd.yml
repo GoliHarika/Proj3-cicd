@@ -1,4 +1,4 @@
-name: CI/CD by Sync Zipped HTML and Deploy CFN from S3
+name: CI/CD by Sync Zipped HTML and Update Lambda Functions
 
 on:
   push:
@@ -10,9 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout the repository
       - name: Checkout code
         uses: actions/checkout@v4.2.2
 
+      # Step 2: Set up AWS CLI
       - name: Set up AWS CLI
         uses: aws-actions/configure-aws-credentials@v4.1.0
         with:
@@ -20,9 +22,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-2
 
+      # Step 3: Install zip utility
       - name: Install zip
         run: sudo apt-get install -y zip
 
+      # Step 4: Zip the HTML file
       - name: Zip the HTML file
         run: |
           if [ -f index.html ]; then
@@ -32,6 +36,7 @@ jobs:
             exit 1
           fi
 
+      # Step 5: Zip the Lambda files from sdk-files
       - name: Zip Lambda files
         run: |
           if [ -f sdk-files/lambda_function.py ]; then
@@ -48,37 +53,24 @@ jobs:
             exit 1
           fi
 
+      # Step 6: Upload to S3 (optional, just for backup)
       - name: Upload to S3
         run: |
           aws s3 cp index.zip s3://proj3-group12-bucket-sdk/proj3/
           aws s3 cp lambda_function.zip s3://proj3-group12-bucket-sdk/proj3/
           aws s3 cp proj3_deployment_lambda.zip s3://proj3-group12-bucket-sdk/proj3/
 
-      - name: Deploy CloudFormation Stacks
+      # Step 7: Update Lambda functions
+      - name: Update Lambda Function 1
         run: |
-          declare -A stacks
-          stacks["group12-participation-backend"]="https://proj3-group12-bucket-sdk.s3.us-east-2.amazonaws.com/proj3/proj3.yml"
-          stacks["group12-participation-frontend"]="https://proj3-group12-bucket-sdk.s3.us-east-2.amazonaws.com/proj3/proj3_frontkend.yml"
-          stacks["group12-participation-amplify"]="https://proj3-group12-bucket-sdk.s3.us-east-2.amazonaws.com/proj3/proj3_amplify.yml"
-
-          for stack in "${!stacks[@]}"; do
-            echo "🚀 Deploying CloudFormation stack: $stack"
-            
-            set +e
-            deploy_output=$(aws cloudformation deploy \
-              --stack-name "$stack" \
-              --template-url "${stacks[$stack]}" \
-              --capabilities CAPABILITY_NAMED_IAM 2>&1)
-            exit_code=$?
-            set -e
-
-            if [ "$exit_code" -eq 0 ]; then
-              echo "✅ Successfully deployed stack: $stack"
-            elif echo "$deploy_output" | grep -q "No changes to deploy"; then
-              echo "ℹ️ No changes to deploy for stack: $stack"
-            else
-              echo "❌ Failed to deploy stack: $stack"
-              echo "$deploy_output"
-              exit "$exit_code"
-            fi
-          done
+          echo "🔄 Updating Lambda function: ProcessImageFunctionSDK"
+          aws lambda update-function-code \
+            --function-name proj3-process-image-sdk \
+            --zip-file fileb://lambda_function.zip
+          
+      - name: Update Lambda Function 2
+        run: |
+          echo "🔄 Updating Lambda function: SdkStartAmplifyDeployment"
+          aws lambda update-function-code \
+            --function-name StartAmplifyDeploymentSDK \
+            --zip-file fileb://proj3_deployment_lambda.zip
