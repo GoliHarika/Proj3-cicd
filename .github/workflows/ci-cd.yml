@@ -69,9 +69,23 @@ jobs:
           stacks["group12-participation-amplify"]="https://proj3-group12-bucket-sdk.s3.us-east-2.amazonaws.com/proj3/proj3_amplify.yml"
 
           for stack in "${!stacks[@]}"; do
-            echo "Deploying CloudFormation stack: $stack"
-            aws cloudformation deploy \
+            echo "🚀 Deploying CloudFormation stack: $stack"
+
+            set +e
+            output=$(aws cloudformation deploy \
               --stack-name "$stack" \
               --template-url "${stacks[$stack]}" \
-              --capabilities CAPABILITY_NAMED_IAM
+              --capabilities CAPABILITY_NAMED_IAM 2>&1)
+            exit_code=$?
+            set -e
+
+            if [ $exit_code -eq 0 ]; then
+              echo "Successfully deployed $stack"
+            elif echo "$output" | grep -q "No changes to deploy"; then
+              echo "No changes to deploy for $stack"
+            else
+              echo "Failed to deploy $stack"
+              echo "$output"
+              exit $exit_code
+            fi
           done
