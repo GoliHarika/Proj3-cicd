@@ -1,9 +1,9 @@
-name: CI/CD by Sync Zipped HTML to S3
+name: CI/CD by Sync Zipped HTML and Deploy CFN from S3
 
 on:
   push:
     branches:
-      - main  # Trigger the workflow on push to the main branch
+      - main
 
 jobs:
   deploy:
@@ -20,7 +20,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2  # Change to your preferred region
+          aws-region: us-east-2
 
       # Step 3: Install zip utility
       - name: Install zip
@@ -36,7 +36,42 @@ jobs:
             exit 1
           fi
 
-      # Step 5: Sync the zipped file to the S3 bucket
-      - name: Deploy to S3
+      # Step 5: Zip the Lambda files from sdk-files
+      - name: Zip Lambda files
+        run: |
+          if [ -f sdk-files/lambda_function.py ]; then
+            zip -j lambda_function.zip sdk-files/lambda_function.py
+          else
+            echo "lambda_function.py not found."
+            exit 1
+          fi
+
+          if [ -f sdk-files/proj3_deployment_lambda.py ]; then
+            zip -j proj3_deployment_lambda.zip sdk-files/proj3_deployment_lambda.py
+          else
+            echo "proj3_deployment_lambda.py not found."
+            exit 1
+          fi
+
+      # Step 6: Upload zipped files to S3
+      - name: Upload to S3
         run: |
           aws s3 cp index.zip s3://proj3-group12-bucket-sdk/proj3/
+          aws s3 cp lambda_function.zip s3://proj3-group12-bucket-sdk/proj3/
+          aws s3 cp proj3_deployment_lambda.zip s3://proj3-group12-bucket-sdk/proj3/
+
+      # Step 7: Deploy CloudFormation Stacks from templates in S3
+      - name: Deploy CloudFormation Stacks
+        run: |
+          declare -A stacks
+          stacks["group12-participation-backend"]="https://proj3-group12-bucket-sdk.s3.us-east-2.amazonaws.com/proj3/proj3.yml"
+          stacks["group12-participation-frontend"]="https://proj3-group12-bucket-sdk.s3.us-east-2.amazonaws.com/proj3/proj3_frontkend.yml"
+          stacks["group12-participation-amplify"]="https://proj3-group12-bucket-sdk.s3.us-east-2.amazonaws.com/proj3/proj3_amplify.yml"
+
+          for stack in "${!stacks[@]}"; do
+            echo "Deploying CloudFormation stack: $stack"
+            aws cloudformation deploy \
+              --stack-name "$stack" \
+              --template-url "${stacks[$stack]}" \
+              --capabilities CAPABILITY_NAMED_IAM
+          done
