@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Participation Verification</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #0047AB, #3EB489);
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 400px;
+            color: #5c84bc;
+        }
+
+        h2 {
+            color: #0047AB;
+            margin-bottom: 20px;
+        }
+
+        input,
+        button {
+            width: 75%;
+            padding: 12px;
+            margin: 8px 0;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+
+        input:focus {
+            border-color: #0047AB;
+            outline: none;
+        }
+
+        button {
+            background: #FF6D3A;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+
+        button:hover {
+            background: #E55A2A;
+        }
+
+        #loading {
+            display: none;
+            margin-top: 10px;
+            font-style: italic;
+            color: #0047AB;
+        }
+
+        #result {
+            margin-top: 20px;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .success {
+            background: #3EB489;
+            color: white;
+        }
+
+        .error {
+            background: #FF6D3A;
+            color: white;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h2>Participation Verification</h2>
+        <input type="text" id="name" placeholder="Enter your name" required>
+        <input type="email" id="email" placeholder="Enter your email" required>
+        <input type="date" id="date" required>
+        <input type="file" id="upload" accept="image/*" required>
+        <button id="addButton" onclick="addDetails()">Add</button>
+        <div id="participantList"></div>
+    </div>
+
+    <script>
+        let participantDetails = [];
+
+        function addDetails() {
+            const name = document.getElementById("name").value.trim();
+            const email = document.getElementById("email").value.trim();
+            const date = document.getElementById("date").value;
+            const fileInput = document.getElementById("upload");
+
+            if (!name || !email || !date || !fileInput.files.length) {
+                alert("Please fill in all fields and select an image.");
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+
+            reader.onloadend = function () {
+                const base64Image = reader.result.split(',')[1];
+
+                const participant = {
+                    name: name,
+                    email: email,
+                    date: date,
+                    image: base64Image
+                };
+
+                participantDetails.push(participant);
+                displayParticipants();
+
+                document.getElementById("name").value = "";
+                document.getElementById("email").value = "";
+                document.getElementById("date").value = "";
+                document.getElementById("upload").value = "";
+            };
+
+            reader.readAsDataURL(file);
+        }
+
+        function displayParticipants() {
+            const participantList = document.getElementById("participantList");
+            participantList.innerHTML = "";
+
+            participantDetails.forEach((participant, index) => {
+                const participantDiv = document.createElement("div");
+                participantDiv.innerHTML = `
+                    <p>${participant.name} - ${participant.email} - ${participant.date}</p>
+                    <button onclick="verifyParticipant(${index})">Verify</button>
+                    <p id="result-${index}" class="hidden"></p>
+                `;
+                participantList.appendChild(participantDiv);
+            });
+        }
+
+        async function verifyParticipant(index) {
+            const participant = participantDetails[index];
+            const resultMessage = document.getElementById(`result-${index}`);
+            resultMessage.style.display = "block";
+            resultMessage.innerText = "Processing...";
+
+            const payload = {
+                name: participant.name,
+                email: participant.email,
+                date: participant.date,
+                image: participant.image
+            };
+
+            try {
+                const response = await fetch("https://b86vcfzxf3.execute-api.us-east-2.amazonaws.com/dev/process-image", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    body: JSON.stringify(payload),
+                    mode: "cors"
+                });
+                console.log("Payload:", JSON.stringify(payload));
+                
+                if (!response.ok) {
+                    throw new Error(`Server Error: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                console.log(result); // Log the result for debugging
+
+                // Check if either name or face match is true directly from result
+                if (result.matching_name || result.matching_face) {
+                    resultMessage.innerText = `${participant.name}: ✅ Participation Confirmed!`;
+                    resultMessage.className = "success";
+                } else {
+                    resultMessage.innerText = `${participant.name}: ❌ No match found.`;
+                    resultMessage.className = "error";
+                }
+            } catch (error) {
+                console.error("Error:", error);
+                resultMessage.className = "error";
+                resultMessage.innerText = "Error processing the request. Please try again.";
+            }
+        }
+    </script>
+</body>
+
+</html>

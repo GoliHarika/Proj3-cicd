@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: Backend stack for Project 3 – Lambda + API Gateway using S3, Textract, Rekognition, and DynamoDB
+
+Parameters:
+  ExistingBucketName:
+    Type: String
+    Default: proj3-group12-bucket-sdk 
+    Description: S3 bucket that contains the Lambda function zip
+
+Resources:
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: proj3-lambda-role-sdk
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: LambdaAllPermissionsPolicySdk
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: S3DynamoAccess
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                Resource:
+                  - !Sub arn:aws:s3:::${ExistingBucketName}/*
+                  - arn:aws:dynamodb:us-east-2:703671913933:table/proj3-participation-sdk
+
+              - Sid: ListS3Buckets
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: arn:aws:s3:::*
+
+              - Sid: RekognitionTextractAccess
+                Effect: Allow
+                Action:
+                  - textract:DetectDocumentText
+                  - textract:AnalyzeDocument
+                  - rekognition:DetectFaces
+                  - rekognition:CompareFaces
+                Resource: "*"
+
+  ImageProcessingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: proj3-process-image-sdk
+      Handler: lambda_function.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref ExistingBucketName
+        S3Key: proj3/lambda_function.zip
+      Runtime: python3.13
+      Timeout: 30
+
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: proj3-api
+      Description: API Gateway for Lambda function
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ParentId: !GetAtt ApiGateway.RootResourceId
+      PathPart: process-image
+
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ImageProcessingLambda.Arn}/invocations
+      MethodResponses:
+        - StatusCode: 200
+
+  ApiGatewayOptionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGateway
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
+  ApiGatewayLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ImageProcessingLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGateway}/*/POST/process-image
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ApiGatewayMethod
+      - ApiGatewayOptionMethod
+    Properties:
+      RestApiId: !Ref ApiGateway
+      StageName: dev
+
+Outputs:
+  LambdaFunctionName:
+    Description: Lambda function created
+    Value: !Ref ImageProcessingLambda
+
+  APIEndpoint:
+    Description: Invoke URL for API Gateway
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/dev/process-image
